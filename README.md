@@ -198,6 +198,8 @@ Repeat for models trained naturally `natural_model.ckpt-49999` and with 0.25-FGS
 
 ## Section 6 - CIFAR-10 Experiments
 
+To use the Madry et al. (2018) WideResNet, you will first need to set your own local `config.json` and fetch the pre-trained models using the `fetch_model.py` script provided here: `https://github.com/MadryLab/cifar10_challenge`
+
 ### Section 6.1 - Fooling images
 
 > Figure 8 a) Fooling image examples
@@ -243,13 +245,18 @@ python cifar10_fooling_images.py --model_path './ckpt/cnn-model' --annot [--gpu 
   <img src="img/Figure11.png" height="250" alt="11"/>
 </p>
 
-#### Section 6.3.2 - Jacobian-based Saliency Map Attack
-
 > Figure 12 CIFAR-10 samples with swapped pixels
+
+```
+cd cifar10/MadryLab
+python disp_rand.py
+```
 
 <p align="center">
   <img src="img/Figure12.png" height="200" alt="12"/>
 </p>
+
+#### Section 6.3.2 - Jacobian-based Saliency Map Attack
 
 ### Section 6.4 - Discussion
 
