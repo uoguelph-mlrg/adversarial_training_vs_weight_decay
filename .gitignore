@@ -1,0 +1,7 @@
+*.gz
+__pychache__
+*.pyc
+*.txt
+*.nfs*
+
+config.json
