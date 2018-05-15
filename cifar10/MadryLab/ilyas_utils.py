@@ -2,6 +2,9 @@ import tensorflow as tf
 from tensorflow.python.framework import ops
 import numpy as np
 
+import os
+import sys
+
 
 def pseudorandom_target(index, total_indices, true_class):
     rng = np.random.RandomState(index)
@@ -142,3 +145,39 @@ def label_to_name(idx):
     class_names = ['airplane', 'auto', 'bird', 'cat',
                    'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
     return class_names[idx]
+
+
+def build_query_save_path(root_path, model_name, img_idx, samples_per_draw, sigma, momentum, ant):
+
+    model_path = ''
+    model_path = os.path.join(root_path, model_name.split('/')[-1]) + '/'
+    model_path += 'idx_' + str(img_idx) + '/'
+    model_path += 'n_' + str(samples_per_draw) + '/'
+    model_path += 'sig_' + str(sigma) + '/'
+    model_path += 'M_' + str(momentum) + '/'
+    if ant:
+        model_path += 'ant'
+
+    # optionally create this dir if it does not already exist,
+    # otherwise, increment
+    model_path = create_dir_if_not_exists(model_path)
+
+    return model_path
+
+
+def create_dir_if_not_exists(path):
+    if not os.path.exists(path):
+        path += '/1'
+        os.makedirs(path)
+    else:
+        digits = []
+        sub_dirs = next(os.walk(path))[1]
+        [digits.append(s) for s in sub_dirs if s.isnumeric()]
+        if len(digits) > 0:
+            sub = str(np.max(np.asarray(sub_dirs).astype('uint8')) + 1)
+        else:
+            sub = '1'
+        path = os.path.join(path, sub)
+        os.makedirs(path)
+    print('Logging to:%s' % path)
+    return path

@@ -16,27 +16,30 @@ from tensorflow.python.client import device_lib
 
 from MadryLab.ilyas_utils import *
 from utils import (parse_model_settings,
-                   build_model_save_path,
                    model_load, data_cifar10)
 from cleverhans.utils import set_log_level, AccuracyReport
 from cleverhans.utils_tf import model_eval
 
+import matplotlib
 import matplotlib.pyplot as plt
+
+font = {'size': 18}
+matplotlib.rc('font', **font)
 
 FLAGS = flags.FLAGS
 
 EPS_ITER = 2
 MAX_BATCH_SIZE = 100
 #OUT_DIR = '/scratch/ssd/gallowaa/cifar10/query/cnn-l2/1/'
-MOMENTUM = 0.9
+#MOMENTUM = 0.9
 # Things you can play around with:
 BATCH_SIZE = 80
-SIGMA = 1e-3
+#SIGMA = 1e-5
 EPSILON = 0.05
 EPS_DECAY = 0.005
 MIN_EPS_DECAY = 5e-5
 LEARNING_RATE = 1e-4
-SAMPLES_PER_DRAW = 8000
+#FLAGS.nb_samples = 400
 MAX_LR = 1e-2
 MIN_LR = 5e-5
 # Things you probably don't want to change:
@@ -112,8 +115,12 @@ if __name__ == '__main__':
 
     par.add_argument('--eps', type=float, default=8, help='epsilon')
 
+    par.add_argument('--momentum', type=float, default=0, help='momentum')
+
+    par.add_argument('--sigma', type=float, default=1e-3, help='sigma')
+
     par.add_argument('--nb_samples', type=int,
-                     default=1000, help='Nb of inputs to attack')
+                     default=800, help='Nb of samples_per_draw')
 
     par.add_argument(
         '--targeted', help='Run a targeted attack?', action="store_true")
@@ -236,7 +243,10 @@ if __name__ == '__main__':
                           'clip_max': 1., })
 
     # Query-efficient gradient estimator here
-    summary_writer = tf.summary.FileWriter(FLAGS.out_dir, sess.graph)
+    if FLAGS.out_dir is not None:
+        out_dir = build_query_save_path(
+            FLAGS.out_dir, model_path, FLAGS.img, FLAGS.nb_samples, FLAGS.sigma, FLAGS.momentum, FLAGS.antithetic)
+        summary_writer = tf.summary.FileWriter(out_dir, sess.graph)
 
     k = 10
     print('Starting partial-information attack with only top-' + str(k))
@@ -254,8 +264,8 @@ if __name__ == '__main__':
 
     target_class = orig_class
     print('Set target class to be original img class %d for partial-info attack' % target_class)
-    batch_size = min(BATCH_SIZE, SAMPLES_PER_DRAW)
-    assert SAMPLES_PER_DRAW % BATCH_SIZE == 0
+    batch_size = min(BATCH_SIZE, FLAGS.nb_samples)
+    assert FLAGS.nb_samples % BATCH_SIZE == 0
     one_hot_vec = one_hot(target_class, nb_classes)
 
     gpus = [get_available_gpus()[0]]
@@ -271,7 +281,7 @@ if __name__ == '__main__':
     else:
         noise = tf.random_normal(
             (batch_size,) + initial_img.shape)
-    eval_points = x + SIGMA * noise
+    eval_points = x + FLAGS.sigma * noise
     logits = model.get_logits(eval_points)
     losses = tf.nn.softmax_cross_entropy_with_logits(
         logits=logits, labels=labels)
@@ -287,17 +297,21 @@ if __name__ == '__main__':
     losses_tiled = tf.tile(tf.reshape(
         losses, (-1, 1, 1, 1)), (1,) + initial_img.shape)
     grad_estimates.append(tf.reduce_mean(losses_tiled * noise,
-                                         axis=0) / SIGMA)
+                                         axis=0) / FLAGS.sigma)
     final_losses.append(losses)
 
     grad_estimate = tf.reduce_mean(grad_estimates, axis=0)
-
-    tf.summary.scalar("stats/grad_estimate",
-                      tf.reduce_mean(tf.abs(grad_estimate)))
+    '''
+    g_u, g_v = tf.nn.moments(
+        tf.abs(grad_estimates), axes=[0], keep_dims=False)
+    tf.summary.scalar("stats/attk_grad_u", tf.reduce_mean(g_u))
+    tf.summary.scalar("stats/att_grad_v", tf.reduce_mean(g_v))
+    '''
     grad_u, grad_var = tf.nn.moments(
         tf.abs(grad_estimate), axes=[0], keep_dims=False)
     tf.summary.scalar("stats/grad_u", tf.reduce_mean(grad_u))
     tf.summary.scalar("stats/grad_v", tf.reduce_mean(grad_var))
+
     final_losses = tf.concat(final_losses, axis=0)
     tf.summary.scalar("final_losses", tf.reduce_mean(final_losses))
     merge_op = tf.summary.merge_all()
@@ -307,7 +321,7 @@ if __name__ == '__main__':
     eval_adv = tf.reduce_sum(tf.to_float(
         tf.equal(eval_preds, target_class)))
 
-    samples_per_draw = SAMPLES_PER_DRAW
+    samples_per_draw = FLAGS.nb_samples
 
     def get_grad(pt, summary_writer, merge_op, i, should_calc_truth=False):
         num_batches = samples_per_draw // batch_size
@@ -330,7 +344,7 @@ if __name__ == '__main__':
 
     def render_frame(image, save_index):
         # actually draw the figure
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 8))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 8))
         # image
         ax1.imshow(image)
         fig.sca(ax1)
@@ -354,23 +368,25 @@ if __name__ == '__main__':
                               for i in topk], rotation='vertical')
         fig.subplots_adjust(bottom=0.2)
 
-        path = os.path.join(FLAGS.out_dir, 'frame%06d.png' % save_index)
-        if os.path.exists(path):
-            os.remove(path)
+        if out_dir is not None:
+            path = os.path.join(out_dir, 'frame%06d.png' % save_index)
+            if os.path.exists(path):
+                os.remove(path)
         plt.savefig(path)
         plt.close()
 
     adv = initial_img.copy().reshape(1, 32, 32, 3)
-    assert FLAGS.out_dir[-1] == '/'
+    #assert out_dir[-1] == '/'
 
-    log_file = open(os.path.join(FLAGS.out_dir, 'log.txt'), 'w+')
+    if FLAGS.out_dir is not None:
+        log_file = open(os.path.join(out_dir, 'log.txt'), 'w+')
     g = 0
     num_queries = 0
 
     last_ls = []
     current_lr = LEARNING_RATE
 
-    max_iters = int(np.ceil(MAX_QUERIES // SAMPLES_PER_DRAW))
+    max_iters = int(np.ceil(MAX_QUERIES // FLAGS.nb_samples))
     real_eps = 0.5
 
     lrs = []
@@ -379,7 +395,8 @@ if __name__ == '__main__':
     last_good_adv = adv
     for i in range(max_iters):
         start = time.time()
-        render_frame(adv.reshape(32, 32, 3), i)
+        if FLAGS.out_dir is not None:
+            render_frame(adv.reshape(32, 32, 3), i)
 
         # see if we should stop
         padv = sess.run(eval_adv, feed_dict={x: adv})
@@ -403,7 +420,7 @@ if __name__ == '__main__':
             last_ls = []
 
         # simple momentum
-        g = MOMENTUM * prev_g + (1.0 - MOMENTUM) * g
+        g = FLAGS.momentum * prev_g + (1.0 - FLAGS.momentum) * g
 
         last_ls.append(l)
         last_ls = last_ls[-5:]
@@ -434,7 +451,7 @@ if __name__ == '__main__':
                 current_lr = current_lr / 2
                 print('backtracking, lr = %.2E' % current_lr)
 
-        num_queries += SAMPLES_PER_DRAW
+        num_queries += FLAGS.nb_samples
 
         log_text = 'Step %05d: loss %.4f eps %.4f eps-decay %.4E lr %.2E (time %.4f)' % (i, l,
                                                                                          real_eps, epsilon_decay, current_lr, time.time() - start)
@@ -442,40 +459,7 @@ if __name__ == '__main__':
         print(log_text)
 
         #np.save(os.path.join(FLAGS.out_dir, '%s.npy' % (i + 1)), adv)
-        #scipy.misc.imsave(os.path.join(FLAGS.out_dir, '%s.png' % (i + 1)), adv.reshape(32,32,3))
+        if FLAGS.out_dir is not None:
+            scipy.misc.imsave(os.path.join(out_dir, '%s.png' % (i + 1)), adv.reshape(32,32,3))
         #summary_writer.add_summary(merged_summ, step)
         # summary_writer.flush()
-
-    '''
-    X_test_adv = attacker.generate_np(adv_inputs, **attack_params)
-
-    if FLAGS.targeted:
-        assert X_test_adv.shape[0] == nb_samples * \
-            (nb_classes - 1), X_test_adv.shape
-        # Evaluate the accuracy of the CIFAR10 model on adversarial
-        # examples
-        print("Evaluating targeted results")
-        adv_accuracy = model_eval(
-            sess, x, y, preds, X_test_adv, true_labels, args=eval_params)
-        # adv_accuracy = model_eval(sess, x, y, preds_adv, adv_inputs, true_labels,
-        #
-    else:
-        # Evaluate the accuracy of the CIFAR10 model on adversarial
-        # examples
-        print("Evaluating un-targeted results")
-        adv_accuracy = model_eval(
-            sess, x, y, preds, X_test_adv, Y_test, args=eval_params)
-
-    print('Test accuracy on adversarial examples %.4f' % adv_accuracy)
-
-    # Compute the avg. distortion introduced by the attack
-    diff = np.abs(X_test_adv - adv_inputs)
-
-    percent_perturbed = np.mean(np.sum(diff, axis=(1, 2, 3)))
-    print('Avg. L_1 norm of perturbations {0:.4f}'.format(
-        percent_perturbed))
-
-    norm = np.mean(np.sqrt(np.sum(np.square(diff), axis=(1, 2, 3))))
-    print('Avg. L_2 norm of perturbations {0:.4f}'.format(norm))
-    '''
-    # sess.close()

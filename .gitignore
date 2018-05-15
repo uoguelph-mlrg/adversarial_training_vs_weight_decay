@@ -5,3 +5,4 @@ __pychache__
 *.nfs*
 
 config.json
+*ipynb
