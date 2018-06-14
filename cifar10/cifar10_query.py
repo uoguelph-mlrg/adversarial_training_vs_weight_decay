@@ -168,7 +168,7 @@ if __name__ == '__main__':
     # Define input TF placeholder
     x = tf.placeholder(tf.float32, shape=(
         None, img_rows, img_cols, channels))
-
+    #adv_ = tf.placeholder(tf.float32, shape=(img_rows * img_cols * channels))
     y = tf.placeholder(tf.float32, shape=(None, 10))
 
     model_path = FLAGS.model_path
@@ -290,7 +290,7 @@ if __name__ == '__main__':
 
     final_losses = tf.concat(final_losses, axis=0)
     tf.summary.scalar("stats/final_losses", tf.reduce_mean(final_losses))
-
+    tf.summary.image("x", tf.reshape(x, [-1, img_rows, img_cols, channels]))
     merge_op = tf.summary.merge_all()
 
     eval_logits = model.get_logits(x)
