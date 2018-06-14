@@ -218,30 +218,6 @@ if __name__ == '__main__':
           ' adversarial examples')
     print("This could take some time ...")
 
-    if FLAGS.attack == 'fgsm':
-        from cleverhans.attacks import FastGradientMethod
-        attacker = FastGradientMethod(model, back='tf', sess=sess)
-        attack_params = {'eps': FLAGS.eps / 255., yname: adv_ys}
-    elif FLAGS.attack == 'pgd':
-        from cleverhans.attacks import MadryEtAl
-        attacker = MadryEtAl(model, sess=sess)
-        attack_params = {'eps': FLAGS.eps / 255., 'eps_iter': EPS_ITER / 255.,
-                         'nb_iter': FLAGS.nb_iter, 'ord': np.inf,
-                         'rand_init': True, 'batch_size': att_batch_size
-                         }
-    elif FLAGS.attack == 'cwl2':
-        from cleverhans.attacks import CarliniWagnerL2
-        attacker = CarliniWagnerL2(model, sess=sess)
-        learning_rate = 0.1
-        attack_params = {'binary_search_steps': 1,
-                         'max_iterations': FLAGS.nb_iter,
-                         'learning_rate': learning_rate,
-                         'initial_const': 10,
-                         'batch_size': att_batch_size
-                         }
-    attack_params.update({'clip_min': 0.,
-                          'clip_max': 1., })
-
     # Query-efficient gradient estimator here
     if FLAGS.out_dir is not None:
         out_dir = build_query_save_path(
@@ -313,7 +289,8 @@ if __name__ == '__main__':
     tf.summary.scalar("stats/grad_v", tf.reduce_mean(grad_var))
 
     final_losses = tf.concat(final_losses, axis=0)
-    tf.summary.scalar("final_losses", tf.reduce_mean(final_losses))
+    tf.summary.scalar("stats/final_losses", tf.reduce_mean(final_losses))
+
     merge_op = tf.summary.merge_all()
 
     eval_logits = model.get_logits(x)
@@ -396,8 +373,8 @@ if __name__ == '__main__':
     for i in range(max_iters):
         start = time.time()
         if FLAGS.out_dir is not None:
-            render_frame(adv.reshape(32, 32, 3), i)
-
+            pass
+            #render_frame(adv.reshape(32, 32, 3), i)
         # see if we should stop
         padv = sess.run(eval_adv, feed_dict={x: adv})
         if (padv == 1) and (real_eps <= EPSILON):
@@ -453,13 +430,18 @@ if __name__ == '__main__':
 
         num_queries += FLAGS.nb_samples
 
-        log_text = 'Step %05d: loss %.4f eps %.4f eps-decay %.4E lr %.2E (time %.4f)' % (i, l,
-                                                                                         real_eps, epsilon_decay, current_lr, time.time() - start)
+        log_text = 's %05d: l %.4f e %.3f eps-d %.2E lr %.2E (t %.2f)' \
+                    % (i, l, real_eps, epsilon_decay, current_lr, time.time() - start)
         #log_file.write(log_text + '\n')
         print(log_text)
 
         #np.save(os.path.join(FLAGS.out_dir, '%s.npy' % (i + 1)), adv)
         if FLAGS.out_dir is not None:
-            scipy.misc.imsave(os.path.join(out_dir, '%s.png' % (i + 1)), adv.reshape(32,32,3))
-        #summary_writer.add_summary(merged_summ, step)
-        # summary_writer.flush()
+            #scipy.misc.imsave(os.path.join(out_dir, '%s.png' % (i + 1)), adv.reshape(32,32,3))
+            summary = tf.Summary()
+            summary.value.add(tag='stats/learning_rate',
+                              simple_value=current_lr)
+            summary.value.add(tag='stats/epsilon',
+                              simple_value=real_eps)
+            summary_writer.add_summary(summary, i)
+            summary_writer.flush()
